@@ -1,0 +1,155 @@
+# Load Data
+
+news_pop <- read.csv("C:/Users/Grigor/OneDrive/Desktop/Master_Program/ADS503/Project/OnlineNewsPopularity/OnlineNewsPopularity.csv")
+summary(news_pop)
+#The dataset has 39,644 samples
+length(news_pop)
+#The dataset has 61 variables. 
+
+# Missing Data
+na.by.col <- apply(news_pop, 2, function(x) sum(is.na(x)))
+any(na.by.col > 0)
+
+#None of the variables are missing any data. 
+
+# Define Target and Predictors
+
+news_pop <- news_pop[, names(news_pop) != "url"] # drop the url column, which functions as a sample ID
+y <- news_pop$shares  # shares is the target variable 
+X <- news_pop[, names(news_pop) != "shares"]
+
+
+# Target Distribution
+
+summary(y)
+hist(y)
+boxplot(y)
+
+
+#The target distribution is highly right-skewed. Let's try log transforming it. 
+
+#The log of the target is much less skewed. Let's apply the log transformation. 
+
+y <- log(y)
+
+
+
+# Binary Predictors
+unique(apply(X, 2, typeof)) # check predictor data types 
+is.binary <- function(x) { # function to check whether or not a variable is binary 
+  n.unique <- length(unique(x))
+  min <- min(x)
+  max <- max(x)
+  if (n.unique == 2 & min == 0 & max == 1) {
+    return(TRUE)
+  }
+  else {
+    return(FALSE)
+  }
+}
+binary.cols <- names(X)[apply(X, 2, is.binary)]
+X.binary <- X[, binary.cols]
+X.non.binary <- X[, !names(X) %in% binary.cols]
+binary.cols
+
+#All predictors are of data type double. 14 of them are binary variables. 
+
+# Near-Zero Variance Predictors
+library(caret)
+deg_cols <- nearZeroVar(X)
+deg_cols
+names(X)[deg_cols]
+kw_min_max <- X[, "kw_min_max"]
+hist(kw_min_max)
+
+
+
+
+
+#kw_min_max is the only predictor with near-zero variance. Let's remove it.
+
+X <- X[, -deg_cols]
+X
+# Predictor Correlations
+## Non-Binary Predictors
+
+library(corrplot)
+Corr_non_binary <- cor(X.non.binary)
+Corr_non_binary
+corrplot(Corr_non_binary)
+
+
+Corr_non_binary_high <- findCorrelation(Corr_non_binary, cutoff = 0.7)
+Corr_non_binary_high
+Corr_non_binary_filtered <- Corr_non_binary[, -Corr_non_binary_high]
+corrplot(Corr_non_binary_filtered)
+
+
+## Binary Predictors
+
+Corr_binary <- cor(X.binary)
+Corr_binary
+corrplot(Corr_binary)
+
+
+Corr_binary_high <- findCorrelation(Corr_binary, cutoff = 0.7)
+Corr_binary_high
+Corr_binary_filtered <- Corr_binary[, -Corr_binary_high]
+corrplot(Corr_binary_filtered)
+
+X.binary <- X.binary[, names(X.binary) != "weekday_is_sunday"]
+
+
+# Split the Data
+set.seed(100)
+trainingRows <- createDataPartition(y, p = .80,  list = FALSE)
+y_train <- y[trainingRows]
+y_test <- y[-trainingRows]
+X_train <- X[trainingRows, ]
+X_test <- X[-trainingRows, ]
+idex <- createFolds(y_train, returnTrain = TRUE)
+ctrl <- trainControl(method = "cv", index = idex)
+
+bin_box <- preProcess(X_train, method = c("BoxCox", "center", "scale"))
+bin_box_trans <- predict(bin_box, X_train)
+
+set.seed(100)
+marsTune_chem <- train(x = X_train, y = y_train,
+                       method = "earth",
+                       tuneGrid = expand.grid(degree = 1, nprune = 2:38),
+                       trControl = ctrl)
+marsTune_chem
+
+
+tuned_pls <- train(x = X_train, y = y_train,
+                   method = "pls",
+                   tuneGrid = expand.grid(ncomp = 1:35),
+                   trControl = ctrl)
+tuned_pls
+plot(tuned_pls)
+varImp(tuned_pls)
+
+tuned_pcr <- train(x = X_train, y = y_train, method = "pcr",
+                   tuneGrid = expand.grid(ncomp = 1:35),
+                   trControl = ctrl)
+plot(tuned_pcr)
+varImp(tuned_pcr)
+ridgeGrid <- expand.grid(lambda = seq(0,.1, length = 15))
+ridge_reg_tune <- train(x = X_train, y = y_train,
+                        method = "ridge",
+                        tuneGrid = ridgeGrid,
+                        trControl = ctrl,
+                        preProc = c("center", "scale"))
+ridge_reg_tune
+plot(ridge_reg_tune)
+
+enetGrid <- expand.grid(lambda = c(0, 0.01, .1),
+                        fraction = seq(.05, 1, length = 20))
+set.seed(100)
+elasticnet_Tune <- train(x = X_train, y = y_train,
+                         method = "enet",
+                         tuneGrid = enetGrid,
+                         trControl = ctrl,
+                         preProc = c("center", "scale"))
+elasticnet_Tune
+plot(elasticnet_Tune)
